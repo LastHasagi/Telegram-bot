@@ -48,7 +48,3 @@ class TelegramBot():
     def send_answer(self, chat_id, answer):
         link_to_send = f'{self.url}sendMessage?chat_id={chat_id}&text={answer}'
         requests.get(link_to_send)
-
-    
-
-        
