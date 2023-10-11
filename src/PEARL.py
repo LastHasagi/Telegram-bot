@@ -4,47 +4,58 @@ import os
 import requests
 import json
 from PIL import Image
+from telegram.ext import CommandHandler, MessageHandler, Updater, ConversationHandler
+from telegram.ext import Filters as filters
+from telegram import Update, ForceReply
 
 user_name = '@dsxservicosbot'
  
 load_dotenv()
+# Define the states for the conversation handler
+MESSAGE, RESPONSE = range(2)
 
 class TelegramBot():
     def __init__(self):
         TOKEN = os.getenv("API_KEY")
         self.url = f"https://api.telegram.org/bot{TOKEN}/"
-        
+        self.conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('send_message', self.send_message)],
+            states={
+                MESSAGE: [MessageHandler(filters.text, self.get_message)],
+                RESPONSE: [MessageHandler(filters.text, self.send_response)]
+            },
+            fallbacks=[]
+        )
 
     def start(self):
         print("Inicializando bot...")
-        update_id = None
-        while True:
-            update = self.get_message(update_id)
-            messages = update['result']
-            if messages:
-                for message in messages:
-                    try:
-                        update_id = message['update_id']
-                        chat_id = message['message']['from']['id']
-                        message_text = message['message']['text']
-                        answer_bot = self.create_answer(message_text)
-                        self.send_answer(chat_id, answer_bot)
-                    except:
-                        pass
+        updater = Updater(token=os.getenv("API_KEY"), use_context=True)
+        dispatcher = updater.dispatcher
+        dispatcher.add_handler(self.conv_handler)
+        updater.start_polling()
 
-    def get_message(self, update_id):
-        link_request = f"{self.url}getUpdates?timeout=1000"
+    def send_message(self, update, context):
+        context.user_data['chat_id'] = update.message.chat_id
+        update.message.reply_text('Qual mensagem você deseja enviar?')
+        return MESSAGE
 
-        if update_id:
-            link_request = f"{self.url}getUpdates?timeout=1000&offset={update_id + 1}"
+    def get_message(self, update, context):
+        context.user_data['message'] = update.message.text
+        update.message.reply_text('Para qual chat você deseja enviar essa mensagem?')
+        return RESPONSE
 
-        result = requests.get(link_request)
-        return json.loads(result.content)
-    
-    def create_answer(self, message_text):
-        if message_text in ['validar']:         
-            return 'Olá, aguardando o envio da planilha'
-             
-    def send_answer(self, chat_id, answer):
-        link_to_send = f'{self.url}sendMessage?chat_id={chat_id}&text={answer}'
-        requests.get(link_to_send)
+    def send_response(self, update, context):
+        chat_id = context.user_data['chat_id']
+        message = context.user_data['message']
+        response = update.message.text
+        sent_message = context.bot.send_message(chat_id=chat_id, text=message)
+        context.user_data['sent_message_id'] = sent_message.message_id
+        context.user_data['response_chat_id'] = update.message.chat_id
+        update.message.reply_text('Mensagem enviada. Aguardando resposta...')
+        return ConversationHandler.END
+
+    def forward_response(self, update, context):
+        response_chat_id = context.user_data['response_chat_id']
+        sent_message_id = context.user_data['sent_message_id']
+        response = update.message.text
+        context.bot.send_message(chat_id=response_chat_id, text=response, reply_to_message_id=sent_message_id)
